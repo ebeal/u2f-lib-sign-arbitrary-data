@@ -41,17 +41,22 @@ Note that this is intended for test/demo purposes, not production use!
 This example requires webob to be installed.
 """
 
-from u2flib_server.u2f import (begin_registration, begin_authentication,
-                               complete_registration, complete_authentication)
+import argparse
+import json
+import logging as log
+import os
+import traceback
+
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding
-from webob.dec import wsgify
+from flask import Flask, render_template, request
+from u2flib_server.u2f import (begin_authentication, begin_registration,
+                               complete_authentication, complete_registration)
 from webob import exc
-import logging as log
-import json
-import traceback
-import argparse
+from webob.dec import wsgify
+
+app = Flask(__name__)
 
 
 def get_origin(environ):
@@ -69,91 +74,76 @@ def get_origin(environ):
     return '%s://%s' % (environ['wsgi.url_scheme'], host)
 
 
-class U2FServer(object):
+users = {}
+app_id = None
 
-    """
-    Very basic server providing a REST API to enroll one or more U2F device with
-    a user, and to perform authentication with the enrolled devices.
-    Only one challenge is valid at a time.
+"""
+Very basic server providing a REST API to enroll one or more U2F device with
+a user, and to perform authentication with the enrolled devices.
+Only one challenge is valid at a time.
 
-    Four calls are provided: enroll, bind, sign and verify. Each of these
-    expects a username parameter, and bind and verify expect a
-    second parameter, data, containing the JSON formatted data which is output
-    by the U2F browser API upon calling the ENROLL or SIGN commands.
-    """
+Four calls are provided: enroll, bind, sign and verify. Each of these
+expects a username parameter, and bind and verify expect a
+second parameter, data, containing the JSON formatted data which is output
+by the U2F browser API upon calling the ENROLL or SIGN commands.
+"""
 
-    def __init__(self):
-        self.users = {}
+@app.route("/")
+def entrypoint():
+    return render_template("index.html")
 
-    @wsgify
-    def __call__(self, request):
-        self.facet = get_origin(request.environ)
-        self.app_id = self.facet
+@app.route("/enroll")
+def enroll():
+    app_id = get_origin(request.environ)
+    username = request.args.get('username', 'user')
+    data = request.data.decode()
+    if username not in users:
+        users[username] = {}
+    user = users[username]
+    enroll = begin_registration(app_id, user.get('_u2f_devices_', []))
+    user['_u2f_enroll_'] = enroll.json
+    return json.dumps(enroll.data_for_client)
 
-        page = request.path_info_pop()
+@app.route("/bind", methods=['POST'])
+def bind():
+    app_id = get_origin(request.environ)
+    username = request.args.get('username', 'user')
+    data = request.data.decode()
+    user = users[username]
+    enroll = user.pop('_u2f_enroll_')
+    device, cert = complete_registration(enroll, data, [app_id])
+    user.setdefault('_u2f_devices_', []).append(device.json)
+    print("U2F device enrolled. Username: %s", username)
+    cert = x509.load_der_x509_certificate(cert, default_backend())
+    log.debug("Attestation certificate:\n%s",
+              cert.public_bytes(Encoding.PEM))
 
-        if not page:
-            return json.dumps([self.facet])
+    return json.dumps(True)
 
-        try:
-            username = request.params.get('username', 'user')
-            data = request.params.get('data', None)
+@app.route("/sign", methods=['POST'])
+def sign():
+    app_id = get_origin(request.environ)
+    username = request.args.get('username', 'user')
+    data = request.data.decode()
+    user = users[username]
+    challenge = begin_authentication(
+        app_id, user.get('_u2f_devices_', []), data)
+    user['_u2f_challenge_'] = challenge.json
+    return json.dumps(challenge.data_for_client)
 
-            if page == 'enroll':
-                return self.enroll(username)
-            elif page == 'bind':
-                return self.bind(username, data)
-            elif page == 'sign':
-                return self.sign(username)
-            elif page == 'verify':
-                return self.verify(username, data)
-            else:
-                raise exc.HTTPNotFound()
-        except Exception:
-            log.exception("Exception in call to '%s'", page)
-            return exc.HTTPBadRequest(comment=traceback.format_exc())
-
-    def enroll(self, username):
-        if username not in self.users:
-            self.users[username] = {}
-
-        user = self.users[username]
-        enroll = begin_registration(self.app_id, user.get('_u2f_devices_', []))
-        user['_u2f_enroll_'] = enroll.json
-        return json.dumps(enroll.data_for_client)
-
-    def bind(self, username, data):
-        user = self.users[username]
-        enroll = user.pop('_u2f_enroll_')
-        device, cert = complete_registration(enroll, data, [self.facet])
-        user.setdefault('_u2f_devices_', []).append(device.json)
-
-        log.info("U2F device enrolled. Username: %s", username)
-        cert = x509.load_der_x509_certificate(cert, default_backend())
-        log.debug("Attestation certificate:\n%s",
-                  cert.public_bytes(Encoding.PEM))
-
-        return json.dumps(True)
-
-    def sign(self, username):
-        user = self.users[username]
-        challenge = begin_authentication(
-            self.app_id, user.get('_u2f_devices_', []))
-        user['_u2f_challenge_'] = challenge.json
-        return json.dumps(challenge.data_for_client)
-
-    def verify(self, username, data):
-        user = self.users[username]
-
-        challenge = user.pop('_u2f_challenge_')
-        device, c, t = complete_authentication(challenge, data, [self.facet])
-        return json.dumps({
-            'keyHandle': device['keyHandle'],
-            'touch': t,
-            'counter': c
-        })
-
-application = U2FServer()
+@app.route("/verify", methods=['POST'])
+def verify():
+    app_id = get_origin(request.environ)
+    username = request.args.get('username', 'user')
+    data = request.data.decode()
+    user = users[username]
+    challenge = user.pop('_u2f_challenge_')
+    device, c, t = complete_authentication(challenge, data, [app_id])
+    return json.dumps({
+        'keyHandle': device['keyHandle'],
+        'touch': t,
+        'counter': c
+    })
 
 if __name__ == '__main__':
     from wsgiref.simple_server import make_server
@@ -172,6 +162,4 @@ if __name__ == '__main__':
 
     log.basicConfig(level=log.DEBUG, format='%(asctime)s %(message)s',
                     datefmt='[%d/%b/%Y %H:%M:%S]')
-    log.info("Starting server on http://%s:%d", args.interface, args.port)
-    httpd = make_server(args.interface, args.port, application)
-    httpd.serve_forever()
+    app.run(host=args.interface, port=args.port, ssl_context=('examples/cert.pem', 'examples/key.pem'), debug=True)

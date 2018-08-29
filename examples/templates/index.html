@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Arbitrary signing POC</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Latest compiled and minified CSS -->
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+
+  <!-- Optional theme -->
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
+  <style>
+    .panel-body {
+      min-height: 125px;
+      padding-top: 30px;
+    }
+    .glyphicon-hand-right {
+      color: #3276b1;
+      font-size: 24px;
+      animation: 3s displaceContent 0.5s infinite;
+      margin-left: 1rem;
+    }
+    @keyframes displaceContent {
+        0% { transform : translateX(0em) }
+        50%   { transform : translateX(1em) } /* slide down to make room for advertisements */
+        100% { transform : translateX(0em) }
+    }
+    pre {
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div ng-app="App" class="body">
+    <div ng-controller="BaseCtrl" class="container">
+      <div class="page-header">
+          <h2>Arbitrary signing POC</h2>
+      </div>
+      <div ng-show="currentState === 'register'">
+        <div class="panel panel-primary">
+          <div class="panel-heading">
+            <h3 class="panel-title">Register yubikey</h3>
+          </div>
+          <div class="panel-body">
+            <div class="alert alert-danger" role="alert" ng-show="registerError.length">{{ '{{registerError}}' }}<br></div>
+            <button class="btn btn-default" ng-click="register(showYubikeyBlinking)" ng-show="!showBlink && !verifiedU2f">Register</button>
+            <button class="btn btn-default" ng-click="changeState('submitData')" ng-show="!showBlink && !verifiedU2f">Device is registered, Sign data now</button>
+            <div class="row"><div class="col-sm-12" ng-show="showBlink">
+              Touch yubikey now <span class="glyphicon glyphicon-hand-right"></span>
+            </div></div>
+
+            <div class="row"><div class="col-sm-12" ng-show="verifiedU2f">
+              Device registered
+            </div></div>
+          </div>
+          <div class="panel-footer clearfix">
+            <button class="btn btn-default pull-right" ng-click="changeState('submitData')" ng-disabled="!verifiedU2f">Sign data</button>
+          </div>
+        </div>
+      </div>
+      <div ng-show="currentState === 'submitData'">
+        <div class="panel panel-primary">
+          <div class="panel-heading">
+            <h3 class="panel-title">Sign data</h3>
+          </div>
+          <div class="panel-body">
+
+            <div class="alert alert-danger" role="alert" ng-show="signError.length">{{ '{{signError}}' }}<br></div>
+            <div><textarea placeholder="Enter Arbitrary data" ng-model="arbitraryData"  class="form-control" rows="3" ng-hide="showBlink || signedData"></textarea><br></div>
+
+            <button class="btn btn-default" ng-click="submitData()" ng-hide="showBlink || signedData">Submit</button>
+            <div ng-show="showBlink">
+              Touch yubikey now <span class="glyphicon glyphicon-hand-right"></span><br>
+            </div>
+            <div ng-show="success">Data signed by hardware token.<br><br></div>
+            <div ng-show="signedData">Data signed by server: <br>
+              <pre>{{ '{{signedData}}' }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.5.0-beta.1/angular.min.js"></script>
+  <script src="https://demo.yubico.com/js/u2f-api.js"></script>
+  <script src="static/main.js"></script>
+</body>
+
+</html>

@@ -97,6 +97,7 @@ def _fix_cert(der):  # Some early certs have UNUSED BITS incorrectly set.
 
 
 def _validate_client_data(client_data, challenge, typ, valid_facets):
+
     if client_data.typ != typ:
         raise ValueError("Wrong type! Was: %r, expecting: %r" % (
             client_data.typ, typ))
@@ -456,6 +457,11 @@ class U2fSignRequest(JSONDict, WithAppId, WithChallenge, WithRegisteredKeys):
 
     @classmethod
     def create(cls, app_id, devices, challenge=None):
+        # When the challenge is set we encode and hash it to be used in the signature
+        if challenge is not None:
+            encoded_challenge = challenge.encode('ascii')
+            challenge = sha_256(encoded_challenge)
+
         if challenge is None:
             challenge = os.urandom(32)
 
